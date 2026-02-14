@@ -40,7 +40,7 @@ public class CompanionEntity extends PathAwareEntity {
     protected void initGoals() {
         this.goalSelector.add(0, new SwimGoal(this));
         this.goalSelector.add(1, new MeleeAttackGoal(this, 1.2, true));
-        this.goalSelector.add(2, new FollowOwnerGoal(this, 1.0, 10.0, 3.0));
+        this.goalSelector.add(2, new com.example.companion.entity.ai.FollowOwnerGoal(this, 1.0, 10.0, 3.0));
         this.goalSelector.add(3, new LookAtEntityGoal(this, PlayerEntity.class, 8.0F));
         this.goalSelector.add(4, new WanderAroundFarGoal(this, 0.8));
         this.targetSelector.add(1, new ActiveTargetGoal<>(this, HostileEntity.class, true));
