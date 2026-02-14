@@ -12,6 +12,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
+import java.util.List;
+
 public class WorldPerceptionSystem {
 
     public static String buildContext(CompanionEntity companion) {
@@ -97,10 +99,72 @@ public class WorldPerceptionSystem {
         sb.append("\"memory\":").append(mem.toJsonSummary()).append(",");
 
         // Progression
-        sb.append("\"progression\":").append(ProgressionTracker.getProgressionJson(companion));
+        sb.append("\"progression\":").append(ProgressionTracker.getProgressionJson(companion)).append(",");
+
+        // Expert strategy advice for current phase
+        String phase = ProgressionTracker.getCurrentPhase(companion);
+        String expertAdvice = ExpertKnowledgeBase.getExpertCommentary(
+                phase,
+                owner != null ? (int) owner.getHealth() : 20,
+                (int) companion.getHealth(),
+                !hostiles.isEmpty(),
+                pos.getY()
+        );
+        sb.append("\"expertAdvice\":\"").append(escapeJson(expertAdvice)).append("\",");
+
+        // Current strategy recommendation
+        String strategy = ExpertKnowledgeBase.getOptimalStrategy(phase);
+        sb.append("\"currentStrategy\":\"").append(escapeJson(strategy.replace("\n", " | "))).append("\",");
+
+        // Available crafting recipes (that can be crafted now)
+        sb.append("\"craftableNow\":[");
+        first = true;
+        for (String recipeName : CraftingChainResolver.getAllRecipeNames()) {
+            CraftingChainResolver.CraftRecipe recipe = CraftingChainResolver.getRecipe(recipeName);
+            if (recipe != null && CraftingChainResolver.canCraft(inv, recipe)) {
+                if (!first) sb.append(",");
+                sb.append("\"").append(recipeName).append("\"");
+                first = false;
+            }
+        }
+        sb.append("],");
+
+        // Craftable with chain resolution
+        sb.append("\"craftableWithChain\":[");
+        first = true;
+        for (String recipeName : CraftingChainResolver.getAllRecipeNames()) {
+            List<CraftingChainResolver.CraftStep> chain = CraftingChainResolver.resolveChain(recipeName, inv);
+            if (chain != null && !chain.isEmpty()) {
+                CraftingChainResolver.CraftRecipe recipe = CraftingChainResolver.getRecipe(recipeName);
+                if (recipe != null && !CraftingChainResolver.canCraft(inv, recipe)) {
+                    // Can craft via chain but not directly
+                    if (!first) sb.append(",");
+                    sb.append("\"").append(recipeName).append("(").append(chain.size()).append(" steps)\"");
+                    first = false;
+                }
+            }
+        }
+        sb.append("],");
+
+        // Building task status
+        BuildingSystem.BuildingTask buildTask = companion.getBuildingTask();
+        if (buildTask != null && !buildTask.completed) {
+            sb.append("\"buildingInProgress\":\"").append(buildTask.blueprint.name())
+              .append(" layer ").append(buildTask.currentLayer + 1)
+              .append("/").append(buildTask.blueprint.layers().length).append("\",");
+        }
+
+        // Biome
+        sb.append("\"biome\":\"").append(world.getBiome(pos).getKey()
+                .map(k -> k.getValue().toString()).orElse("unknown")).append("\"");
 
         sb.append("}");
         return sb.toString();
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
     }
 
     private static boolean isInteresting(BlockState state) {

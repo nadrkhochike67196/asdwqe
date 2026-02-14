@@ -30,7 +30,9 @@ public class CompanionEntity extends PathAwareEntity {
     private final MemorySystem memory = new MemorySystem();
     private final SimpleInventory inventory = new SimpleInventory(27);
     private int aiTickCounter;
+    private int buildTickCounter;
     private String currentAction = "idle";
+    private BuildingSystem.BuildingTask buildingTask;
 
     public CompanionEntity(EntityType<? extends PathAwareEntity> type, World world) {
         super(type, world);
@@ -64,11 +66,56 @@ public class CompanionEntity extends PathAwareEntity {
         // Auto-pickup nearby items
         autoPickup();
 
+        // Continue building task (3 blocks per second)
+        buildTickCounter++;
+        if (buildTickCounter >= 10 && buildingTask != null && !buildingTask.completed) {
+            buildTickCounter = 0;
+            boolean done = BuildingSystem.executeStep(this, buildingTask, 3);
+            if (done) {
+                if (this.getWorld() instanceof ServerWorld sw) {
+                    sw.getServer().getPlayerManager().broadcast(
+                            Text.literal("\u00A7b[Buddy] \u00A7f" +
+                                    PersonalitySystem.formatMessage(
+                                            "ГОТОВО! Построил " + buildingTask.blueprint.name(),
+                                            PersonalitySystem.ResponseStyle.EXCITED)),
+                            false);
+                }
+                buildingTask = null;
+            }
+        }
+
+        // Spontaneous reactions
+        checkAndReact();
+
         // AI decision every 5 seconds
         aiTickCounter++;
         if (aiTickCounter >= 100) {
             aiTickCounter = 0;
             queryAI();
+        }
+    }
+
+    /**
+     * Check for events and react spontaneously
+     */
+    private void checkAndReact() {
+        // Only react every 2 seconds
+        if (aiTickCounter % 40 != 0) return;
+
+        PlayerEntity owner = getOwnerPlayer();
+        if (owner == null) return;
+
+        // Player low HP
+        if (owner.getHealth() <= 6 && owner.getHealth() > 0) {
+            broadcastMessage(PersonalitySystem.reactToEvent(PersonalitySystem.GameEventType.PLAYER_LOW_HP));
+        }
+
+        // Check for creepers
+        var creepers = this.getWorld().getEntitiesByClass(
+                net.minecraft.entity.mob.CreeperEntity.class,
+                this.getBoundingBox().expand(10.0), e -> true);
+        if (!creepers.isEmpty()) {
+            broadcastMessage(PersonalitySystem.reactToEvent(PersonalitySystem.GameEventType.CREEPER_NEARBY));
         }
     }
 
@@ -93,6 +140,41 @@ public class CompanionEntity extends PathAwareEntity {
 
     public void onPlayerChat(PlayerEntity player, String message) {
         if (this.getWorld().isClient()) return;
+
+        // Check for direct commands first
+        PlayerCommandSystem.CommandType cmd = PlayerCommandSystem.parseCommand(message);
+        switch (cmd) {
+            case TELEPORT -> {
+                PlayerCommandSystem.teleportToPlayer(this, player);
+                broadcastMessage(PersonalitySystem.formatMessage(
+                        "Телепортнулся! Что надо?",
+                        PersonalitySystem.ResponseStyle.CASUAL));
+                return;
+            }
+            case STAY -> {
+                this.getNavigation().stop();
+                broadcastMessage(PersonalitySystem.formatMessage(
+                        "Ок, стою тут",
+                        PersonalitySystem.ResponseStyle.CASUAL));
+                return;
+            }
+            case BUILD -> {
+                // Extract building type from message and start build
+                String blueprintKey = BuildingSystem.findBlueprint(message);
+                if (blueprintKey != null) {
+                    ActionExecutor.executeBuild(this, blueprintKey);
+                } else {
+                    broadcastMessage(PersonalitySystem.formatMessage(
+                            "Хз что построить. Могу: " + String.join(", ", BuildingSystem.getAvailableBlueprints()),
+                            PersonalitySystem.ResponseStyle.ANNOYED));
+                }
+                return;
+            }
+            default -> {
+                // CHAT or other — pass to AI
+            }
+        }
+
         String context = WorldPerceptionSystem.buildContext(this);
         aiBrain.chat(player.getName().getString(), message, context).thenAccept(action -> {
             if (this.getWorld() instanceof ServerWorld sw) {
@@ -104,12 +186,20 @@ public class CompanionEntity extends PathAwareEntity {
     private void processAction(AIBrain.AIAction action) {
         this.currentAction = action.action();
 
-        // Broadcast message
-        if (action.message() != null && !action.message().isEmpty()) {
-            if (this.getWorld() instanceof ServerWorld sw) {
-                sw.getServer().getPlayerManager().broadcast(
-                        Text.literal("\u00A7b[Buddy] \u00A7f" + action.message()), false);
-            }
+        // Apply personality to the message
+        String message = action.message();
+        if (message != null && !message.isEmpty()) {
+            boolean hasHostiles = !this.getWorld().getEntitiesByClass(
+                    net.minecraft.entity.mob.HostileEntity.class,
+                    this.getBoundingBox().expand(16.0), e -> true).isEmpty();
+
+            PersonalitySystem.ResponseStyle style = PersonalitySystem.determineStyle(
+                    action.action(), hasHostiles,
+                    (int) this.getHealth(), (int) this.getMaxHealth());
+
+            // Apply personality formatting
+            message = PersonalitySystem.formatMessage(message, style);
+            broadcastMessage(message);
         }
 
         // Remember interesting blocks from mining actions
@@ -121,6 +211,14 @@ public class CompanionEntity extends PathAwareEntity {
 
         // Execute action
         ActionExecutor.execute(this, action);
+    }
+
+    private void broadcastMessage(String msg) {
+        if (msg == null || msg.isEmpty()) return;
+        if (this.getWorld() instanceof ServerWorld sw) {
+            sw.getServer().getPlayerManager().broadcast(
+                    Text.literal("\u00A7b[Buddy] \u00A7f" + msg), false);
+        }
     }
 
     @Override
@@ -153,6 +251,8 @@ public class CompanionEntity extends PathAwareEntity {
     public SimpleInventory getCompanionInventory() { return inventory; }
     public MemorySystem getMemory() { return memory; }
     public UUID getOwnerUuid() { return ownerUuid; }
+    public BuildingSystem.BuildingTask getBuildingTask() { return buildingTask; }
+    public void setBuildingTask(BuildingSystem.BuildingTask task) { this.buildingTask = task; }
 
     public PlayerEntity getOwnerPlayer() {
         if (ownerUuid == null) return null;
