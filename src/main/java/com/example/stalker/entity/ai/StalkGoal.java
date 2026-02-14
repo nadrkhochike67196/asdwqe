@@ -19,11 +19,16 @@ public class StalkGoal extends Goal {
     @Override
     public boolean canStart() {
         LivingEntity targetEntity = this.stalker.getTarget();
-        if (targetEntity instanceof PlayerEntity) {
-            this.target = (PlayerEntity) targetEntity;
+        if (targetEntity instanceof PlayerEntity player) {
+            this.target = player;
             return isPlayerLookingAtStalker(this.target, this.stalker);
         }
         return false;
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return this.target != null && this.target.isAlive() && isPlayerLookingAtStalker(this.target, this.stalker);
     }
 
     @Override

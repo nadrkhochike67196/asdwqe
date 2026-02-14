@@ -3,17 +3,18 @@ package com.example.stalker.entity.ai;
 import com.example.stalker.entity.StalkerEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.goal.Goal;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.sound.SoundEvents;
 import java.util.EnumSet;
 
-public class TeleportAttackGoal extends Goal {
+public class ScreamGoal extends Goal {
     private final StalkerEntity stalker;
     private PlayerEntity target;
     private int cooldown;
 
-    public TeleportAttackGoal(StalkerEntity stalker) {
+    public ScreamGoal(StalkerEntity stalker) {
         this.stalker = stalker;
         this.setControls(EnumSet.of(Control.MOVE));
     }
@@ -27,7 +28,7 @@ public class TeleportAttackGoal extends Goal {
         LivingEntity targetEntity = this.stalker.getTarget();
         if (targetEntity instanceof PlayerEntity player) {
             this.target = player;
-            return this.stalker.distanceTo(this.target) > 3.0
+            return this.stalker.distanceTo(this.target) < 8.0
                     && !StalkGoal.isPlayerLookingAtStalker(this.target, this.stalker);
         }
         return false;
@@ -40,19 +41,17 @@ public class TeleportAttackGoal extends Goal {
 
     @Override
     public void start() {
-        if (target == null) return;
-        teleportBehind(target);
-        cooldown = stalker.isEnraged() ? 30 : 60;
-    }
+        if (target == null || stalker.getWorld().isClient()) return;
 
-    private void teleportBehind(PlayerEntity target) {
-        Vec3d lookVec = target.getRotationVec(1.0F).normalize();
-        Vec3d targetPos = target.getPos();
-        Vec3d teleportPos = targetPos.subtract(lookVec.multiply(4.0));
+        target.addStatusEffect(new StatusEffectInstance(StatusEffects.BLINDNESS, 100, 0));
+        target.addStatusEffect(new StatusEffectInstance(StatusEffects.SLOWNESS, 60, 1));
+        target.addStatusEffect(new StatusEffectInstance(StatusEffects.WEAKNESS, 60, 0));
 
-        if (stalker.teleport(teleportPos.x, target.getY(), teleportPos.z, true)) {
-            stalker.playSound(SoundEvents.ENTITY_ENDERMAN_TELEPORT, 1.0F, 1.0F);
-            stalker.getNavigation().startMovingTo(target, 1.5);
+        if (stalker.isEnraged()) {
+            target.addStatusEffect(new StatusEffectInstance(StatusEffects.WITHER, 80, 1));
         }
+
+        stalker.playSound(SoundEvents.ENTITY_WARDEN_ROAR, 2.0F, 0.5F);
+        cooldown = 200;
     }
 }
