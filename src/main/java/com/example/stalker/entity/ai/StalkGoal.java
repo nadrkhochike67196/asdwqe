@@ -1,6 +1,7 @@
 package com.example.stalker.entity.ai;
 
 import com.example.stalker.entity.StalkerEntity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.goal.Goal;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.Vec3d;
@@ -17,8 +18,12 @@ public class StalkGoal extends Goal {
 
     @Override
     public boolean canStart() {
-        this.target = this.stalker.getTarget();
-        return this.target != null && isPlayerLookingAtStalker(this.target, this.stalker);
+        LivingEntity targetEntity = this.stalker.getTarget();
+        if (targetEntity instanceof PlayerEntity) {
+            this.target = (PlayerEntity) targetEntity;
+            return isPlayerLookingAtStalker(this.target, this.stalker);
+        }
+        return false;
     }
 
     @Override
