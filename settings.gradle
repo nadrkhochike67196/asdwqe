@@ -5,4 +5,4 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
-rootProject.name = 'stalker-mod'
+rootProject.name = 'companion-mod'

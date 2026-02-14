@@ -1,6 +1,6 @@
 {
     "required": true,
-    "package": "com.example.stalker.mixin",
+    "package": "com.example.companion.mixin",
     "compatibilityLevel": "JAVA_17",
     "mixins": [],
     "injectors": {

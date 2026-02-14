@@ -1,37 +1,29 @@
 {
-  "schemaVersion": 1,
-  "id": "stalker",
-  "version": "${version}",
-  "name": "Stalker Mod",
-  "description": "Adds a creepy stalker mob to Minecraft.",
-  "authors": [
-    "Me"
-  ],
-  "contact": {
-    "homepage": "https://fabricmc.net/",
-    "sources": "https://github.com/FabricMC/fabric-example-mod"
-  },
-  "license": "CC0-1.0",
-  "icon": "assets/stalker/icon.png",
-  "environment": "*",
-  "entrypoints": {
-    "main": [
-      "com.example.stalker.StalkerMod"
+    "schemaVersion": 1,
+    "id": "companion",
+    "version": "${version}",
+    "name": "AI Companion Mod",
+    "description": "An AI-powered companion that survives alongside you using real AI.",
+    "authors": [
+        "Me"
     ],
-    "client": [
-      "com.example.stalker.StalkerClientMod"
-    ]
-  },
-  "mixins": [
-    "stalker.mixins.json"
-  ],
-  "depends": {
-    "fabricloader": ">=0.14.22",
-    "minecraft": "~1.20.1",
-    "java": ">=17",
-    "fabric-api": "*"
-  },
-  "suggests": {
-    "another-mod": "*"
-  }
+    "license": "CC0-1.0",
+    "environment": "*",
+    "entrypoints": {
+        "main": [
+            "com.example.companion.CompanionMod"
+        ],
+        "client": [
+            "com.example.companion.CompanionClientMod"
+        ]
+    },
+    "mixins": [
+        "companion.mixins.json"
+    ],
+    "depends": {
+        "fabricloader": ">=0.14.22",
+        "minecraft": "~1.20.1",
+        "java": ">=17",
+        "fabric-api": "*"
+    }
 }
