@@ -17,20 +17,20 @@ public class StalkGoal extends Goal {
 
     @Override
     public boolean canStart() {
-        this.target = this.stalker.getWorld().getClosestPlayer(this.stalker, 64.0);
-        return this.target != null;
+        this.target = this.stalker.getTarget();
+        return this.target != null && isPlayerLookingAtStalker(this.target, this.stalker);
+    }
+
+    @Override
+    public void start() {
+        this.stalker.getNavigation().stop();
     }
 
     @Override
     public void tick() {
-        if (this.target == null) return;
-        
-        this.stalker.getLookControl().lookAt(this.target, 30.0F, 30.0F);
-
-        if (isPlayerLookingAtStalker(this.target, this.stalker)) {
+        if (this.target != null) {
+            this.stalker.getLookControl().lookAt(this.target, 30.0F, 30.0F);
             this.stalker.getNavigation().stop();
-        } else {
-            this.stalker.getNavigation().startMovingTo(this.target, 1.2);
         }
     }
 

@@ -19,7 +19,7 @@ public class TeleportAttackGoal extends Goal {
 
     @Override
     public boolean canStart() {
-        this.target = this.stalker.getWorld().getClosestPlayer(this.stalker, 16.0);
+        this.target = this.stalker.getTarget();
         return this.target != null && this.stalker.distanceTo(this.target) > 3.0;
     }
 
