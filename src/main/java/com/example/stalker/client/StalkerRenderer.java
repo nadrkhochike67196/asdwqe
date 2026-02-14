@@ -1,5 +1,6 @@
 package com.example.stalker.client;
 
+import com.example.stalker.StalkerClientMod;
 import com.example.stalker.StalkerMod;
 import com.example.stalker.entity.StalkerEntity;
 import net.minecraft.client.render.entity.EntityRendererFactory;
