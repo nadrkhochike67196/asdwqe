@@ -1,7 +1,6 @@
 package com.example.companion.entity.ai;
 
 import com.example.companion.entity.CompanionEntity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;

@@ -12,7 +12,6 @@ import net.minecraft.entity.SpawnGroup;
 import net.minecraft.item.SpawnEggItem;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
-import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 
 public class CompanionMod implements ModInitializer {
@@ -32,23 +31,13 @@ public class CompanionMod implements ModInitializer {
         Registry.register(Registries.ITEM, new Identifier(MOD_ID, "companion_spawn_egg"),
                 new SpawnEggItem(COMPANION, 0x3498DB, 0xF1C40F, new FabricItemSettings()));
 
-        // Listen for player chat messages and forward to companion
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
             String text = message.getContent().getString();
-            ServerPlayerEntity player = sender;
-
-            // Find all companions owned by this player in their world
-            player.getServerWorld().getEntitiesByClass(
+            sender.getServerWorld().getEntitiesByClass(
                     CompanionEntity.class,
-                    player.getBoundingBox().expand(64.0),
-                    companion -> {
-                        if (companion.getOwnerUuid() != null &&
-                                companion.getOwnerUuid().equals(player.getUuid())) {
-                            return true;
-                        }
-                        return false;
-                    }
-            ).forEach(companion -> companion.onPlayerChat(player, text));
+                    sender.getBoundingBox().expand(64.0),
+                    c -> c.getOwnerUuid() != null && c.getOwnerUuid().equals(sender.getUuid())
+            ).forEach(c -> c.onPlayerChat(sender, text));
         });
     }
 }

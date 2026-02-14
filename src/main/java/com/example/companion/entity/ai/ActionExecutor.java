@@ -72,8 +72,8 @@ public class ActionExecutor {
     }
 
     public static void executeAttack(CompanionEntity entity) {
-        var hostiles = entity.getWorld().getEntitiesByClass(HostileEntity.class,
-                entity.getBoundingBox().expand(16.0), e -> true);
+        var hostiles = new java.util.ArrayList<>(entity.getWorld().getEntitiesByClass(HostileEntity.class,
+                entity.getBoundingBox().expand(16.0), e -> true));
         if (!hostiles.isEmpty()) {
             hostiles.sort((a, b) -> Double.compare(entity.distanceTo(a), entity.distanceTo(b)));
             entity.setTarget(hostiles.get(0));
