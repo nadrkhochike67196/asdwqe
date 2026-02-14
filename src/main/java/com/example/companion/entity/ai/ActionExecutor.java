@@ -47,16 +47,19 @@ public class ActionExecutor {
         if (world.isClient() || world.getBlockState(pos).isAir()) return;
         double dist = Math.sqrt(entity.getBlockPos().getSquaredDistance(pos));
         if (dist < 5.0) {
+            // Close enough — break immediately
             world.breakBlock(pos, true);
             entity.swingHand(Hand.MAIN_HAND);
             entity.playSound(SoundEvents.BLOCK_STONE_BREAK, 1.0F, 1.0F);
         } else {
-            entity.getNavigation().startMovingTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, 1.0);
+            // Too far — push a persistent MINE task that will navigate + break on arrival
+            entity.getTaskMachine().setMineTask(pos);
         }
     }
 
     public static void executeMove(CompanionEntity entity, BlockPos pos) {
-        entity.getNavigation().startMovingTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, 1.0);
+        // Push a persistent MOVE task — state machine handles navigation every tick
+        entity.getTaskMachine().setMoveTask(pos);
     }
 
     public static void executeAttack(CompanionEntity entity) {
@@ -196,7 +199,8 @@ public class ActionExecutor {
                         PersonalitySystem.ResponseStyle.ANNOYED));
             }
         } else {
-            entity.getNavigation().startMovingTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, 1.0);
+            // Push persistent PLACE task
+            entity.getTaskMachine().setPlaceTask(pos, itemId);
         }
     }
 
@@ -317,6 +321,8 @@ public class ActionExecutor {
     }
 
     public static void executeFollow(CompanionEntity entity) {
+        // Cancel any active task so FollowOwnerGoal can take over
+        entity.getTaskMachine().cancel();
         PlayerEntity owner = entity.getOwnerPlayer();
         if (owner != null) entity.getNavigation().startMovingTo(owner, 1.0);
     }
@@ -345,6 +351,7 @@ public class ActionExecutor {
         if (entity.getWorld() instanceof ServerWorld sw) {
             sw.getServer().getPlayerManager().broadcast(
                     Text.literal("\u00A7b[Buddy] \u00A7f" + msg), false);
+            TTSSystem.speakToAll(msg, sw);
         }
     }
 }

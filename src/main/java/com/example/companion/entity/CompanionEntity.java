@@ -28,6 +28,7 @@ public class CompanionEntity extends PathAwareEntity {
     private UUID ownerUuid;
     private final AIBrain aiBrain = new AIBrain();
     private final MemorySystem memory = new MemorySystem();
+    private final TaskStateMachine taskMachine = new TaskStateMachine();
     private final SimpleInventory inventory = new SimpleInventory(27);
     private int aiTickCounter;
     private int buildTickCounter;
@@ -66,20 +67,18 @@ public class CompanionEntity extends PathAwareEntity {
         // Auto-pickup nearby items
         autoPickup();
 
+        // ── Task state machine — runs EVERY tick for persistent actions ──
+        taskMachine.tick(this);
+
         // Continue building task (3 blocks per second)
         buildTickCounter++;
         if (buildTickCounter >= 10 && buildingTask != null && !buildingTask.completed) {
             buildTickCounter = 0;
             boolean done = BuildingSystem.executeStep(this, buildingTask, 3);
             if (done) {
-                if (this.getWorld() instanceof ServerWorld sw) {
-                    sw.getServer().getPlayerManager().broadcast(
-                            Text.literal("\u00A7b[Buddy] \u00A7f" +
-                                    PersonalitySystem.formatMessage(
-                                            "ГОТОВО! Построил " + buildingTask.blueprint.name(),
-                                            PersonalitySystem.ResponseStyle.EXCITED)),
-                            false);
-                }
+                broadcastMessage(PersonalitySystem.formatMessage(
+                        "ГОТОВО! Построил " + buildingTask.blueprint.name(),
+                        PersonalitySystem.ResponseStyle.EXCITED));
                 buildingTask = null;
             }
         }
@@ -87,9 +86,9 @@ public class CompanionEntity extends PathAwareEntity {
         // Spontaneous reactions
         checkAndReact();
 
-        // AI decision every 5 seconds
+        // AI decision every 3 seconds (was 5s — faster = more responsive)
         aiTickCounter++;
-        if (aiTickCounter >= 100) {
+        if (aiTickCounter >= 60) {
             aiTickCounter = 0;
             queryAI();
         }
@@ -153,6 +152,7 @@ public class CompanionEntity extends PathAwareEntity {
             }
             case STAY -> {
                 this.getNavigation().stop();
+                this.taskMachine.cancel();  // Cancel any active task
                 broadcastMessage(PersonalitySystem.formatMessage(
                         "Ок, стою тут",
                         PersonalitySystem.ResponseStyle.CASUAL));
@@ -218,6 +218,8 @@ public class CompanionEntity extends PathAwareEntity {
         if (this.getWorld() instanceof ServerWorld sw) {
             sw.getServer().getPlayerManager().broadcast(
                     Text.literal("\u00A7b[Buddy] \u00A7f" + msg), false);
+            // Also send as TTS audio
+            TTSSystem.speakToAll(msg, sw);
         }
     }
 
@@ -250,9 +252,15 @@ public class CompanionEntity extends PathAwareEntity {
     // Accessors
     public SimpleInventory getCompanionInventory() { return inventory; }
     public MemorySystem getMemory() { return memory; }
+    public TaskStateMachine getTaskMachine() { return taskMachine; }
     public UUID getOwnerUuid() { return ownerUuid; }
     public BuildingSystem.BuildingTask getBuildingTask() { return buildingTask; }
     public void setBuildingTask(BuildingSystem.BuildingTask task) { this.buildingTask = task; }
+
+    /** True when the companion has an active task (mining, moving, building). FollowOwnerGoal yields to this. */
+    public boolean isBusy() {
+        return taskMachine.isBusy() || (buildingTask != null && !buildingTask.completed);
+    }
 
     public PlayerEntity getOwnerPlayer() {
         if (ownerUuid == null) return null;

@@ -2,6 +2,7 @@ package com.example.companion;
 
 import com.example.companion.client.CompanionModel;
 import com.example.companion.client.CompanionRenderer;
+import com.example.companion.client.TTSClientHandler;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityModelLayerRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
@@ -16,5 +17,8 @@ public class CompanionClientMod implements ClientModInitializer {
     public void onInitializeClient() {
         EntityRendererRegistry.register(CompanionMod.COMPANION, CompanionRenderer::new);
         EntityModelLayerRegistry.registerModelLayer(COMPANION_MODEL_LAYER, CompanionModel::getTexturedModelData);
+
+        // Register TTS audio packet receiver
+        TTSClientHandler.register();
     }
 }

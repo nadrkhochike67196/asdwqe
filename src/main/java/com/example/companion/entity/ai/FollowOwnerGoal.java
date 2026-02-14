@@ -24,6 +24,9 @@ public class FollowOwnerGoal extends Goal {
 
     @Override
     public boolean canStart() {
+        // YIELD to active tasks — if the companion is busy mining/moving/placing, don't follow
+        if (this.companion.isBusy()) return false;
+
         PlayerEntity owner = this.companion.getOwnerPlayer();
         if (owner == null) return false;
         if (this.companion.distanceTo(owner) < this.minDist) return false;
@@ -33,6 +36,7 @@ public class FollowOwnerGoal extends Goal {
 
     @Override
     public boolean shouldContinue() {
+        if (this.companion.isBusy()) return false;
         if (this.owner == null || !this.owner.isAlive()) return false;
         return this.companion.distanceTo(this.owner) > this.minDist;
     }
@@ -47,7 +51,7 @@ public class FollowOwnerGoal extends Goal {
         this.companion.getLookControl().lookAt(this.owner, 10.0F, this.companion.getMaxLookPitchChange());
         if (--this.updateTimer <= 0) {
             this.updateTimer = 10;
-            if (this.companion.distanceTo(this.owner) > 30.0) {
+            if (this.companion.distanceTo(this.owner) > 50.0) {
                 this.companion.requestTeleport(this.owner.getX(), this.owner.getY(), this.owner.getZ());
             } else {
                 this.companion.getNavigation().startMovingTo(this.owner, this.speed);
