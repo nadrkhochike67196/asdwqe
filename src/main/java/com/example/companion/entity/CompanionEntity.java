@@ -1,8 +1,8 @@
 package com.example.companion.entity;
 
-import com.example.companion.entity.ai.AIBrain;
-import com.example.companion.entity.ai.FollowOwnerGoal;
+import com.example.companion.entity.ai.*;
 import net.minecraft.entity.EntityType;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.ai.goal.*;
 import net.minecraft.entity.attribute.DefaultAttributeContainer;
@@ -10,7 +10,10 @@ import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.mob.PathAwareEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.inventory.SimpleInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
@@ -23,14 +26,14 @@ import java.util.UUID;
 
 public class CompanionEntity extends PathAwareEntity {
     private UUID ownerUuid;
-    private final AIBrain aiBrain;
+    private final AIBrain aiBrain = new AIBrain();
+    private final MemorySystem memory = new MemorySystem();
+    private final SimpleInventory inventory = new SimpleInventory(27);
     private int aiTickCounter;
-    private String currentAction = "IDLE";
-    private BlockPos targetMinePos;
+    private String currentAction = "idle";
 
-    public CompanionEntity(EntityType<? extends PathAwareEntity> entityType, World world) {
-        super(entityType, world);
-        this.aiBrain = new AIBrain();
+    public CompanionEntity(EntityType<? extends PathAwareEntity> type, World world) {
+        super(type, world);
     }
 
     @Override
@@ -40,7 +43,6 @@ public class CompanionEntity extends PathAwareEntity {
         this.goalSelector.add(2, new FollowOwnerGoal(this, 1.0, 10.0, 3.0));
         this.goalSelector.add(3, new LookAtEntityGoal(this, PlayerEntity.class, 8.0F));
         this.goalSelector.add(4, new WanderAroundFarGoal(this, 0.8));
-
         this.targetSelector.add(1, new ActiveTargetGoal<>(this, HostileEntity.class, true));
         this.targetSelector.add(2, new RevengeGoal(this));
     }
@@ -57,87 +59,68 @@ public class CompanionEntity extends PathAwareEntity {
     @Override
     public void tick() {
         super.tick();
-        if (!this.getWorld().isClient() && ownerUuid != null) {
-            aiTickCounter++;
-            if (aiTickCounter >= 100) { // every 5 seconds
-                aiTickCounter = 0;
-                queryAI();
-            }
-            executeCurrentAction();
+        if (this.getWorld().isClient() || ownerUuid == null) return;
+
+        // Auto-pickup nearby items
+        autoPickup();
+
+        // AI decision every 5 seconds
+        aiTickCounter++;
+        if (aiTickCounter >= 100) {
+            aiTickCounter = 0;
+            queryAI();
+        }
+    }
+
+    private void autoPickup() {
+        var items = this.getWorld().getEntitiesByClass(ItemEntity.class,
+                this.getBoundingBox().expand(2.0), e -> true);
+        for (ItemEntity ie : items) {
+            ItemStack rem = inventory.addStack(ie.getStack().copy());
+            if (rem.isEmpty()) ie.discard();
+            else ie.setStack(rem);
         }
     }
 
     private void queryAI() {
-        String gameState = aiBrain.collectGameState(this);
-        aiBrain.think(gameState).thenAccept(action -> {
-            if (this.getWorld() instanceof ServerWorld serverWorld) {
-                serverWorld.getServer().execute(() -> processAIResponse(action));
+        String context = WorldPerceptionSystem.buildContext(this);
+        aiBrain.think(context).thenAccept(action -> {
+            if (this.getWorld() instanceof ServerWorld sw) {
+                sw.getServer().execute(() -> processAction(action));
             }
         });
     }
 
-    /** Called when a player chats with the companion */
     public void onPlayerChat(PlayerEntity player, String message) {
         if (this.getWorld().isClient()) return;
-        String gameState = aiBrain.collectGameState(this);
-        aiBrain.chat(player.getName().getString(), message, gameState).thenAccept(action -> {
-            if (this.getWorld() instanceof ServerWorld serverWorld) {
-                serverWorld.getServer().execute(() -> processAIResponse(action));
+        String context = WorldPerceptionSystem.buildContext(this);
+        aiBrain.chat(player.getName().getString(), message, context).thenAccept(action -> {
+            if (this.getWorld() instanceof ServerWorld sw) {
+                sw.getServer().execute(() -> processAction(action));
             }
         });
     }
 
-    private void processAIResponse(AIBrain.AIAction action) {
+    private void processAction(AIBrain.AIAction action) {
         this.currentAction = action.action();
 
-        // Always broadcast the say message
+        // Broadcast message
         if (action.message() != null && !action.message().isEmpty()) {
-            if (this.getWorld() instanceof ServerWorld serverWorld) {
-                serverWorld.getServer().getPlayerManager().broadcast(
+            if (this.getWorld() instanceof ServerWorld sw) {
+                sw.getServer().getPlayerManager().broadcast(
                         Text.literal("\u00A7b[Buddy] \u00A7f" + action.message()), false);
             }
         }
 
-        switch (action.action()) {
-            case "ATTACK" -> {
-                var hostile = this.getWorld().getClosestEntity(
-                        HostileEntity.class,
-                        net.minecraft.entity.ai.TargetPredicate.DEFAULT,
-                        this, this.getX(), this.getY(), this.getZ(),
-                        this.getBoundingBox().expand(16.0)
-                );
-                if (hostile != null) this.setTarget(hostile);
-            }
-            case "MINE" -> {
-                if (action.x() != 0 || action.y() != 0 || action.z() != 0) {
-                    this.targetMinePos = new BlockPos(action.x(), action.y(), action.z());
-                }
-            }
-            case "EAT" -> {
-                if (this.getHealth() < this.getMaxHealth()) {
-                    this.heal(6.0F);
-                    this.playSound(SoundEvents.ENTITY_GENERIC_EAT, 1.0F, 1.0F);
-                }
-            }
-            default -> { /* FOLLOW, IDLE, SPEAK handled by goals or no-op */ }
+        // Remember interesting blocks from mining actions
+        if ("mine".equals(action.action()) && action.x() != 0) {
+            BlockPos bp = new BlockPos(action.x(), action.y(), action.z());
+            String name = this.getWorld().getBlockState(bp).getBlock().getName().getString();
+            memory.remember(name, bp);
         }
-    }
 
-    private void executeCurrentAction() {
-        if ("MINE".equals(currentAction) && targetMinePos != null) {
-            double dist = Math.sqrt(this.getBlockPos().getSquaredDistance(targetMinePos));
-            if (dist < 4.0) {
-                if (!this.getWorld().getBlockState(targetMinePos).isAir()) {
-                    this.getWorld().breakBlock(targetMinePos, true);
-                    this.playSound(SoundEvents.BLOCK_STONE_BREAK, 1.0F, 1.0F);
-                }
-                targetMinePos = null;
-                currentAction = "IDLE";
-            } else {
-                this.getNavigation().startMovingTo(
-                        targetMinePos.getX(), targetMinePos.getY(), targetMinePos.getZ(), 1.0);
-            }
-        }
+        // Execute action
+        ActionExecutor.execute(this, action);
     }
 
     @Override
@@ -146,33 +129,42 @@ public class CompanionEntity extends PathAwareEntity {
             if (ownerUuid == null) {
                 this.ownerUuid = player.getUuid();
                 this.playSound(SoundEvents.ENTITY_VILLAGER_YES, 1.0F, 1.0F);
-                player.sendMessage(Text.literal("\u00A7a[Buddy] I am now your companion! Talk to me in chat!"), false);
+                player.sendMessage(Text.literal("\u00A7a[Buddy] \u00A7fI'm your companion now! Talk to me in chat!"), false);
                 return ActionResult.SUCCESS;
             } else if (ownerUuid.equals(player.getUuid())) {
-                player.sendMessage(Text.literal("\u00A7e[Buddy] Action: " + currentAction), false);
+                player.sendMessage(Text.literal(
+                        "\u00A7e[Buddy] \u00A7fAction: " + currentAction +
+                        " | HP: " + (int) getHealth() +
+                        " | Items: " + countItems()), false);
                 return ActionResult.SUCCESS;
             }
         }
         return super.interactMob(player, hand);
     }
 
-    public PlayerEntity getOwnerPlayer() {
-        if (ownerUuid == null) return null;
-        if (this.getWorld() instanceof ServerWorld serverWorld) {
-            return serverWorld.getServer().getPlayerManager().getPlayer(ownerUuid);
-        }
-        return null;
+    private int countItems() {
+        int c = 0;
+        for (int i = 0; i < inventory.size(); i++)
+            if (!inventory.getStack(i).isEmpty()) c++;
+        return c;
     }
 
-    public UUID getOwnerUuid() {
-        return ownerUuid;
+    // Accessors
+    public SimpleInventory getCompanionInventory() { return inventory; }
+    public MemorySystem getMemory() { return memory; }
+    public UUID getOwnerUuid() { return ownerUuid; }
+
+    public PlayerEntity getOwnerPlayer() {
+        if (ownerUuid == null) return null;
+        if (this.getWorld() instanceof ServerWorld sw)
+            return sw.getServer().getPlayerManager().getPlayer(ownerUuid);
+        return null;
     }
 
     @Override
     public boolean canTarget(LivingEntity target) {
-        if (target instanceof PlayerEntity player && ownerUuid != null) {
-            return !player.getUuid().equals(ownerUuid);
-        }
+        if (target instanceof PlayerEntity p && ownerUuid != null)
+            return !p.getUuid().equals(ownerUuid);
         return super.canTarget(target);
     }
 
@@ -180,11 +172,34 @@ public class CompanionEntity extends PathAwareEntity {
     public void writeCustomDataToNbt(NbtCompound nbt) {
         super.writeCustomDataToNbt(nbt);
         if (ownerUuid != null) nbt.putUuid("OwnerUUID", ownerUuid);
+        nbt.put("Memory", memory.toNbt());
+        // Save inventory
+        NbtList invList = new NbtList();
+        for (int i = 0; i < inventory.size(); i++) {
+            ItemStack stack = inventory.getStack(i);
+            if (!stack.isEmpty()) {
+                NbtCompound item = new NbtCompound();
+                item.putByte("Slot", (byte) i);
+                stack.writeNbt(item);
+                invList.add(item);
+            }
+        }
+        nbt.put("Inventory", invList);
     }
 
     @Override
     public void readCustomDataFromNbt(NbtCompound nbt) {
         super.readCustomDataFromNbt(nbt);
         if (nbt.containsUuid("OwnerUUID")) ownerUuid = nbt.getUuid("OwnerUUID");
+        if (nbt.contains("Memory")) memory.fromNbt(nbt.getCompound("Memory"));
+        if (nbt.contains("Inventory")) {
+            NbtList invList = nbt.getList("Inventory", 10);
+            for (int i = 0; i < invList.size(); i++) {
+                NbtCompound item = invList.getCompound(i);
+                int slot = item.getByte("Slot") & 255;
+                if (slot < inventory.size())
+                    inventory.setStack(slot, ItemStack.fromNbt(item));
+            }
+        }
     }
 }

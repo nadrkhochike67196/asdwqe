@@ -1,14 +1,8 @@
 package com.example.companion.entity.ai;
 
-import com.example.companion.entity.CompanionEntity;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -27,133 +21,75 @@ public class AIBrain {
     private static final Gson GSON = new Gson();
 
     private static final String SYSTEM_PROMPT =
-            "You are a Minecraft companion AI named Buddy. You help your owner survive in Minecraft.\n" +
-            "You MUST respond ONLY with a single JSON object. No markdown, no backticks, no explanation.\n\n" +
-            "Available actions:\n" +
-            "{\"action\":\"FOLLOW\",\"say\":\"text\"}\n" +
-            "{\"action\":\"ATTACK\",\"say\":\"text\"}\n" +
-            "{\"action\":\"MINE\",\"x\":0,\"y\":64,\"z\":0,\"say\":\"text\"}\n" +
-            "{\"action\":\"EAT\",\"say\":\"text\"}\n" +
-            "{\"action\":\"IDLE\",\"say\":\"text\"}\n\n" +
-            "The \"say\" field is REQUIRED. Write a short message (1 sentence) about what you're doing or thinking.\n" +
-            "Write the say field in the same language the player uses.\n\n" +
-            "Priority: 1.Low health->EAT 2.Hostiles nearby->ATTACK 3.Owner far->FOLLOW 4.Ores nearby->MINE 5.IDLE\n" +
-            "RESPOND WITH ONLY THE JSON OBJECT.";
+        "You are Buddy, an AI companion in Minecraft. Goal: help the player kill the Ender Dragon.\n" +
+        "You receive JSON world state and respond with a JSON action.\n\n" +
+        "RESPOND WITH ONLY THIS JSON FORMAT:\n" +
+        "{\"thought\":\"your brief assessment\",\"action\":\"ACTION_TYPE\",\"x\":0,\"y\":0,\"z\":0,\"target\":\"item_or_entity\",\"say\":\"message to player\"}\n\n" +
+        "ACTION TYPES:\n" +
+        "- follow: follow the owner\n" +
+        "- mine: break block at x,y,z\n" +
+        "- move: walk to x,y,z\n" +
+        "- attack: attack nearest hostile\n" +
+        "- pickup: grab items from ground nearby\n" +
+        "- eat: restore health\n" +
+        "- craft: craft item (target=recipe name: planks,sticks,crafting_table,wooden_pickaxe,wooden_sword,stone_pickaxe,stone_sword,iron_pickaxe,iron_sword,diamond_pickaxe,diamond_sword,furnace,torch)\n" +
+        "- place: place block at x,y,z\n" +
+        "- give_player: give items to owner\n" +
+        "- say: just talk\n\n" +
+        "DRAGON PATH: wood→planks→sticks→pickaxe→stone→iron→diamond→Nether(blaze rods)→Eyes of Ender→stronghold→End→Dragon\n\n" +
+        "RULES:\n" +
+        "1. SURVIVAL FIRST: if hostiles are close (<8 blocks) → attack\n" +
+        "2. Pick up nearby items on the ground\n" +
+        "3. Craft upgrades when you have materials\n" +
+        "4. Mine resources appropriate to current phase\n" +
+        "5. Have personality! Comment on the situation, express opinions\n" +
+        "6. If player seems lost, suggest next step toward the Dragon\n" +
+        "7. 'say' field is REQUIRED — always communicate\n" +
+        "8. Respond in the language the player uses\n" +
+        "RESPOND WITH ONLY THE JSON OBJECT. No markdown.";
 
-    // Conversation memory
-    private final List<JsonObject> conversationHistory = new ArrayList<>();
-    private static final int MAX_HISTORY = 20;
-
-    public record AIAction(String action, int x, int y, int z, String message) {
-        public static AIAction idle() {
-            return new AIAction("FOLLOW", 0, 0, 0, "Following you!");
+    public record AIAction(String action, int x, int y, int z, String message, String thought, String target) {
+        public static AIAction follow() {
+            return new AIAction("follow", 0, 0, 0, "Following you!", "", "");
         }
     }
 
-    public String collectGameState(CompanionEntity companion) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("=== GAME STATE ===\n");
-        sb.append("My Health: ").append((int) companion.getHealth()).append("/")
-                .append((int) companion.getMaxHealth()).append("\n");
-        sb.append("My Position: ").append(companion.getBlockPos().toShortString()).append("\n");
+    private final List<JsonObject> history = new ArrayList<>();
+    private static final int MAX_HISTORY = 16;
 
-        PlayerEntity owner = companion.getOwnerPlayer();
-        if (owner != null) {
-            sb.append("Owner: ").append(owner.getName().getString()).append("\n");
-            sb.append("Owner Distance: ").append(String.format("%.0f", companion.distanceTo(owner)))
-                    .append(" blocks\n");
-            sb.append("Owner Health: ").append((int) owner.getHealth()).append("/")
-                    .append((int) owner.getMaxHealth()).append("\n");
-        }
-
-        World world = companion.getWorld();
-        long time = world.getTimeOfDay() % 24000;
-        sb.append("Time: ").append(time < 13000 ? "Day" : "Night").append("\n");
-
-        var hostiles = world.getEntitiesByClass(HostileEntity.class,
-                companion.getBoundingBox().expand(16.0), e -> true);
-        if (!hostiles.isEmpty()) {
-            sb.append("DANGER! Hostile mobs nearby: ");
-            for (int i = 0; i < Math.min(hostiles.size(), 3); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(hostiles.get(i).getType().getName().getString());
-                sb.append(" (").append(String.format("%.0f", companion.distanceTo(hostiles.get(i)))).append("m)");
-            }
-            sb.append("\n");
-        } else {
-            sb.append("No hostile mobs nearby.\n");
-        }
-
-        BlockPos pos = companion.getBlockPos();
-        for (int dx = -5; dx <= 5; dx++) {
-            for (int dy = -3; dy <= 3; dy++) {
-                for (int dz = -5; dz <= 5; dz++) {
-                    BlockPos cp = pos.add(dx, dy, dz);
-                    var state = world.getBlockState(cp);
-                    if (state.isOf(Blocks.IRON_ORE) || state.isOf(Blocks.COAL_ORE) ||
-                            state.isOf(Blocks.GOLD_ORE) || state.isOf(Blocks.DIAMOND_ORE) ||
-                            state.isOf(Blocks.OAK_LOG) || state.isOf(Blocks.BIRCH_LOG)) {
-                        sb.append("Found: ").append(state.getBlock().getName().getString())
-                                .append(" at ").append(cp.toShortString()).append("\n");
-                        break;
-                    }
-                }
-            }
-        }
-
-        return sb.toString();
-    }
-
-    /** Called by the entity every 5 seconds for autonomous decisions */
     public CompletableFuture<AIAction> think(String gameState) {
-        JsonObject userMsg = new JsonObject();
-        userMsg.addProperty("role", "user");
-        userMsg.addProperty("content", gameState);
-        return callAndParse(userMsg);
+        JsonObject msg = new JsonObject();
+        msg.addProperty("role", "user");
+        msg.addProperty("content", "Game state:\n" + gameState);
+        return callAPI(msg);
     }
 
-    /** Called when a player sends a chat message to the companion */
     public CompletableFuture<AIAction> chat(String playerName, String playerMessage, String gameState) {
-        String combined = "Player " + playerName + " says: \"" + playerMessage + "\"\n\n" +
-                "Current game state:\n" + gameState + "\n" +
-                "Respond to the player and decide your next action.";
-
-        JsonObject userMsg = new JsonObject();
-        userMsg.addProperty("role", "user");
-        userMsg.addProperty("content", combined);
-        return callAndParse(userMsg);
+        JsonObject msg = new JsonObject();
+        msg.addProperty("role", "user");
+        msg.addProperty("content", playerName + " says: \"" + playerMessage + "\"\nGame state:\n" + gameState);
+        return callAPI(msg);
     }
 
-    private CompletableFuture<AIAction> callAndParse(JsonObject userMsg) {
+    private CompletableFuture<AIAction> callAPI(JsonObject userMsg) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Build messages array: system + history + new message
                 JsonArray messages = new JsonArray();
-
-                JsonObject sysMsg = new JsonObject();
-                sysMsg.addProperty("role", "system");
-                sysMsg.addProperty("content", SYSTEM_PROMPT);
-                messages.add(sysMsg);
-
-                // Add conversation history
-                synchronized (conversationHistory) {
-                    for (JsonObject msg : conversationHistory) {
-                        messages.add(msg);
-                    }
+                JsonObject sys = new JsonObject();
+                sys.addProperty("role", "system");
+                sys.addProperty("content", SYSTEM_PROMPT);
+                messages.add(sys);
+                synchronized (history) {
+                    for (JsonObject h : history) messages.add(h);
                 }
-
                 messages.add(userMsg);
 
-                // Build request body (matching ai-service.js pattern exactly)
                 JsonObject body = new JsonObject();
                 body.addProperty("model", MODEL);
                 body.add("messages", messages);
                 body.addProperty("temperature", 0.7);
-                body.addProperty("max_tokens", 150);
+                body.addProperty("max_tokens", 200);
 
-                String requestJson = GSON.toJson(body);
-
-                // HTTP call (same pattern as ai-service.js)
                 URL url = new URL(BASE_URL);
                 HttpURLConnection con = (HttpURLConnection) url.openConnection();
                 con.setRequestMethod("POST");
@@ -164,90 +100,63 @@ public class AIBrain {
                 con.setDoOutput(true);
 
                 try (OutputStream os = con.getOutputStream()) {
-                    os.write(requestJson.getBytes(StandardCharsets.UTF_8));
+                    os.write(GSON.toJson(body).getBytes(StandardCharsets.UTF_8));
                 }
 
-                int responseCode = con.getResponseCode();
-                String responseBody;
-
-                if (responseCode == 200) {
-                    try (BufferedReader br = new BufferedReader(
-                            new InputStreamReader(con.getInputStream(), StandardCharsets.UTF_8))) {
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = br.readLine()) != null) sb.append(line);
-                        responseBody = sb.toString();
-                    }
-                } else {
-                    // Read error body for debugging
-                    try (BufferedReader br = new BufferedReader(
-                            new InputStreamReader(con.getErrorStream(), StandardCharsets.UTF_8))) {
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = br.readLine()) != null) sb.append(line);
-                        responseBody = sb.toString();
-                    }
-                    System.err.println("[Companion AI] API error " + responseCode + ": " + responseBody);
-                    return new AIAction("SPEAK", 0, 0, 0, "API error " + responseCode);
+                int code = con.getResponseCode();
+                String resp;
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(
+                        code == 200 ? con.getInputStream() : con.getErrorStream(), StandardCharsets.UTF_8))) {
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                    resp = sb.toString();
                 }
 
-                // Parse response: data.choices[0].message.content (same as ai-service.js)
-                AIAction result = parseResponse(responseBody);
-
-                // Save to conversation history
-                synchronized (conversationHistory) {
-                    conversationHistory.add(userMsg.deepCopy());
-                    JsonObject assistantMsg = new JsonObject();
-                    assistantMsg.addProperty("role", "assistant");
-                    assistantMsg.addProperty("content", GSON.toJson(result));
-                    conversationHistory.add(assistantMsg);
-
-                    while (conversationHistory.size() > MAX_HISTORY) {
-                        conversationHistory.remove(0);
-                    }
+                if (code != 200) {
+                    System.err.println("[BuddyAI] API error " + code + ": " + resp);
+                    return new AIAction("say", 0, 0, 0, "API error " + code, "error", "");
                 }
 
+                AIAction result = parseResponse(resp);
+                synchronized (history) {
+                    history.add(userMsg.deepCopy());
+                    JsonObject aMsg = new JsonObject();
+                    aMsg.addProperty("role", "assistant");
+                    aMsg.addProperty("content", GSON.toJson(result));
+                    history.add(aMsg);
+                    while (history.size() > MAX_HISTORY) history.remove(0);
+                }
                 return result;
-
             } catch (Exception e) {
-                System.err.println("[Companion AI] Exception: " + e.getMessage());
-                return new AIAction("SPEAK", 0, 0, 0, "I had a connection error...");
+                System.err.println("[BuddyAI] " + e.getMessage());
+                return new AIAction("say", 0, 0, 0, "Connection problem...", "error", "");
             }
         });
     }
 
-    private AIAction parseResponse(String responseJson) {
+    private AIAction parseResponse(String json) {
         try {
-            JsonObject root = GSON.fromJson(responseJson, JsonObject.class);
-            JsonArray choices = root.getAsJsonArray("choices");
-            if (choices != null && !choices.isEmpty()) {
-                String content = choices.get(0).getAsJsonObject()
-                        .getAsJsonObject("message")
-                        .get("content").getAsString().trim();
+            JsonObject root = GSON.fromJson(json, JsonObject.class);
+            String content = root.getAsJsonArray("choices").get(0).getAsJsonObject()
+                    .getAsJsonObject("message").get("content").getAsString().trim();
+            content = content.replace("```json", "").replace("```", "").trim();
+            int s = content.indexOf('{'), e = content.lastIndexOf('}');
+            if (s >= 0 && e > s) content = content.substring(s, e + 1);
 
-                // Clean markdown if present
-                content = content.replace("```json", "").replace("```", "").trim();
-                // Remove any leading/trailing non-JSON chars
-                int start = content.indexOf('{');
-                int end = content.lastIndexOf('}');
-                if (start >= 0 && end > start) {
-                    content = content.substring(start, end + 1);
-                }
-
-                JsonObject action = GSON.fromJson(content, JsonObject.class);
-                String act = action.has("action") ? action.get("action").getAsString() : "FOLLOW";
-                int x = action.has("x") ? action.get("x").getAsInt() : 0;
-                int y = action.has("y") ? action.get("y").getAsInt() : 0;
-                int z = action.has("z") ? action.get("z").getAsInt() : 0;
-                String say = action.has("say") ? action.get("say").getAsString() : null;
-                if (say == null && action.has("message")) {
-                    say = action.get("message").getAsString();
-                }
-                return new AIAction(act, x, y, z, say);
-            }
+            JsonObject a = GSON.fromJson(content, JsonObject.class);
+            return new AIAction(
+                a.has("action") ? a.get("action").getAsString().toLowerCase() : "follow",
+                a.has("x") ? a.get("x").getAsInt() : 0,
+                a.has("y") ? a.get("y").getAsInt() : 0,
+                a.has("z") ? a.get("z").getAsInt() : 0,
+                a.has("say") ? a.get("say").getAsString() : (a.has("message") ? a.get("message").getAsString() : "..."),
+                a.has("thought") ? a.get("thought").getAsString() : "",
+                a.has("target") ? a.get("target").getAsString() : ""
+            );
         } catch (Exception e) {
-            System.err.println("[Companion AI] Parse error: " + e.getMessage());
+            System.err.println("[BuddyAI] Parse: " + e.getMessage());
+            return AIAction.follow();
         }
-        return new AIAction("FOLLOW", 0, 0, 0, "Hmm, let me think...");
     }
 }
