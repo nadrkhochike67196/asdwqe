@@ -23,7 +23,7 @@ import java.util.concurrent.CompletableFuture;
 public class AIBrain {
     private static final String BASE_URL = "https://gen.pollinations.ai/v1/chat/completions";
     private static final String API_KEY = "sk_LAfN0hmVGrw5mMAoSaGNPfJJF4NVm5eH";
-    private static final String MODEL = "gemini";
+    private static final String MODEL = "gemini-fast";
     private static final Gson GSON = new Gson();
 
     private static final String SYSTEM_PROMPT =
