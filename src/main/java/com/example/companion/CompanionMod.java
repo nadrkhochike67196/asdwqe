@@ -3,6 +3,7 @@ package com.example.companion;
 import com.example.companion.entity.CompanionEntity;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.item.v1.FabricItemSettings;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricEntityTypeBuilder;
 import net.minecraft.entity.EntityDimensions;
@@ -11,6 +12,7 @@ import net.minecraft.entity.SpawnGroup;
 import net.minecraft.item.SpawnEggItem;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 
 public class CompanionMod implements ModInitializer {
@@ -29,5 +31,24 @@ public class CompanionMod implements ModInitializer {
         FabricDefaultAttributeRegistry.register(COMPANION, CompanionEntity.createCompanionAttributes());
         Registry.register(Registries.ITEM, new Identifier(MOD_ID, "companion_spawn_egg"),
                 new SpawnEggItem(COMPANION, 0x3498DB, 0xF1C40F, new FabricItemSettings()));
+
+        // Listen for player chat messages and forward to companion
+        ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
+            String text = message.getContent().getString();
+            ServerPlayerEntity player = sender;
+
+            // Find all companions owned by this player in their world
+            player.getServerWorld().getEntitiesByClass(
+                    CompanionEntity.class,
+                    player.getBoundingBox().expand(64.0),
+                    companion -> {
+                        if (companion.getOwnerUuid() != null &&
+                                companion.getOwnerUuid().equals(player.getUuid())) {
+                            return true;
+                        }
+                        return false;
+                    }
+            ).forEach(companion -> companion.onPlayerChat(player, text));
+        });
     }
 }

@@ -59,7 +59,7 @@ public class CompanionEntity extends PathAwareEntity {
         super.tick();
         if (!this.getWorld().isClient() && ownerUuid != null) {
             aiTickCounter++;
-            if (aiTickCounter >= 100) {
+            if (aiTickCounter >= 100) { // every 5 seconds
                 aiTickCounter = 0;
                 queryAI();
             }
@@ -76,8 +76,28 @@ public class CompanionEntity extends PathAwareEntity {
         });
     }
 
+    /** Called when a player chats with the companion */
+    public void onPlayerChat(PlayerEntity player, String message) {
+        if (this.getWorld().isClient()) return;
+        String gameState = aiBrain.collectGameState(this);
+        aiBrain.chat(player.getName().getString(), message, gameState).thenAccept(action -> {
+            if (this.getWorld() instanceof ServerWorld serverWorld) {
+                serverWorld.getServer().execute(() -> processAIResponse(action));
+            }
+        });
+    }
+
     private void processAIResponse(AIBrain.AIAction action) {
         this.currentAction = action.action();
+
+        // Always broadcast the say message
+        if (action.message() != null && !action.message().isEmpty()) {
+            if (this.getWorld() instanceof ServerWorld serverWorld) {
+                serverWorld.getServer().getPlayerManager().broadcast(
+                        Text.literal("\u00A7b[Buddy] \u00A7f" + action.message()), false);
+            }
+        }
+
         switch (action.action()) {
             case "ATTACK" -> {
                 var hostile = this.getWorld().getClosestEntity(
@@ -99,13 +119,7 @@ public class CompanionEntity extends PathAwareEntity {
                     this.playSound(SoundEvents.ENTITY_GENERIC_EAT, 1.0F, 1.0F);
                 }
             }
-            case "SPEAK" -> {
-                if (action.message() != null && this.getWorld() instanceof ServerWorld serverWorld) {
-                    serverWorld.getServer().getPlayerManager().broadcast(
-                            Text.literal("\u00A7b[Companion] \u00A7f" + action.message()), false);
-                }
-            }
-            default -> { /* FOLLOW, IDLE - handled by goals */ }
+            default -> { /* FOLLOW, IDLE, SPEAK handled by goals or no-op */ }
         }
     }
 
@@ -132,10 +146,10 @@ public class CompanionEntity extends PathAwareEntity {
             if (ownerUuid == null) {
                 this.ownerUuid = player.getUuid();
                 this.playSound(SoundEvents.ENTITY_VILLAGER_YES, 1.0F, 1.0F);
-                player.sendMessage(Text.literal("\u00A7a[Companion] I am now your companion!"), false);
+                player.sendMessage(Text.literal("\u00A7a[Buddy] I am now your companion! Talk to me in chat!"), false);
                 return ActionResult.SUCCESS;
             } else if (ownerUuid.equals(player.getUuid())) {
-                player.sendMessage(Text.literal("\u00A7e[Companion] Action: " + currentAction), false);
+                player.sendMessage(Text.literal("\u00A7e[Buddy] Action: " + currentAction), false);
                 return ActionResult.SUCCESS;
             }
         }
@@ -148,6 +162,10 @@ public class CompanionEntity extends PathAwareEntity {
             return serverWorld.getServer().getPlayerManager().getPlayer(ownerUuid);
         }
         return null;
+    }
+
+    public UUID getOwnerUuid() {
+        return ownerUuid;
     }
 
     @Override
